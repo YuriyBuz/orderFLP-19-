@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Замовлення соусів</title>
+    <link rel="icon" href="https://foodline-production.com/wp-content/uploads/2021/10/cropped-favicon-32x32.png" sizes="32x32">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Використовуємо XLSX для парсингу Excel файлу -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        html { scroll-behavior: smooth; }
+        /* Custom scrollbar styling */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f3f4f6; }
+        ::-webkit-webkit-scrollbar-thumb { background: #a0aec0; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #718096; }
+        /* Hide number input spin buttons */
+        input[type='number'] { -moz-appearance: textfield; }
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        #search-clear-btn.hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body class="antialiased font-sans bg-gray-100 text-gray-800">
+
+    <!-- Main Container -->
+    <div id="app" class="max-w-4xl mx-auto p-4 md:p-6 pb-32 min-h-screen">
+
+        <!-- Header Container -->
+        <div class="bg-gray-100 sticky top-0 z-20 pt-4 pb-2">
+            <!-- Header -->
+            <header class="flex justify-between items-center mb-4">
+                <div class="flex items-center space-x-4">
+                    <!-- Logo and Title -->
+                    <img src="https://foodline-production.com/wp-content/uploads/2021/10/3752781497_3752781497.webp" alt="Food Line Production Logo" class="w-16 h-16 md:w-20 md:h-20 object-contain rounded-lg shadow-md" onerror="this.onerror=null;this.src='https://placehold.co/80x80/eee/333?text=Logo';">
+                    <div>
+                         <h1 class="text-2xl font-bold text-gray-800 hidden md:block">Замовлення соусів та продуктів</h1>
+                         <p id="current-date" class="text-sm text-gray-600 mt-1"></p>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Search Bar -->
+            <div class="relative mb-6">
+                <input type="text" id="search-input" placeholder="Пошук за назвою..." class="w-full p-3 pl-10 border border-gray-300 rounded-xl shadow-inner focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                </div>
+                <button id="search-clear-btn" class="absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer hidden">
+                    <svg class="w-5 h-5 text-gray-500 hover:text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Product Table -->
+        <main id="product-list" class="space-y-8 mt-4">
+            <div id="loading-indicator" class="text-center py-10 text-gray-500">
+                <p>Ініціалізація...</p>
+            </div>
+        </main>
+        
+        <!-- Order Details -->
+        <section id="order-details-section" class="mt-8 bg-white border border-gray-200 rounded-xl shadow-lg p-6 space-y-4 hidden">
+            <h2 class="text-xl font-bold text-gray-800 border-b pb-2">Деталі замовлення</h2>
+            <div>
+                <label for="delivery-address" class="block text-sm font-medium mb-1">Адреса доставки</label>
+                <input type="text" id="delivery-address" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition-colors" placeholder="Місто, вулиця, будинок">
+            </div>
+            <div>
+                <label for="contact-person" class="block text-sm font-medium mb-1">Контактна особа</label>
+                <input type="text" id="contact-person" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition-colors" placeholder="Ім'я та телефон">
+            </div>
+            <div>
+                <label for="order-comment" class="block text-sm font-medium mb-1">Коментар до замовлення</label>
+                <textarea id="order-comment" rows="3" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition-colors" placeholder="Будь-які побажання"></textarea>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- Floating Footer Bar -->
+    <footer id="footer-bar" class="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-gray-200 p-4 shadow-2xl transition-transform translate-y-full duration-500 z-40">
+        <div class="max-w-4xl mx-auto flex flex-col md:flex-row justify-between items-center space-y-3 md:space-y-0">
+            <div class="text-center md:text-left">
+                <span class="text-lg font-medium text-gray-700">Всього:</span>
+                <span id="grand-total" class="text-2xl font-extrabold text-blue-600 ml-2 block md:inline-block">0.00 грн</span>
+            </div>
+            <div class="flex space-x-3 w-full md:w-auto">
+                <button id="reset-order" class="flex-1 px-4 py-3 bg-red-500 text-white font-semibold rounded-xl shadow-md hover:bg-red-600 transition-colors flex items-center justify-center space-x-2">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    <span class="text-lg">Скинути</span>
+                </button>
+                <button id="share-order" class="flex-1 px-4 py-3 bg-yellow-500 text-white font-semibold rounded-xl shadow-md hover:bg-yellow-600 transition-colors flex items-center justify-center space-x-2">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12s-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.368a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z"></path></svg>
+                    <span class="text-lg">Надіслати</span>
+                </button>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Image Modal -->
+    <div id="image-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 hidden z-50">
+        <div class="bg-white rounded-xl p-4 max-w-lg w-full relative shadow-2xl">
+            <button id="close-modal" class="absolute -top-3 -right-3 text-white bg-gray-900 rounded-full h-10 w-10 text-2xl font-bold flex items-center justify-center border-2 border-white transition-transform hover:scale-110">&times;</button>
+            <img id="modal-img" src="" alt="Зображення товару" class="w-full h-auto rounded-lg object-contain max-h-[80vh]">
+            <p id="modal-caption" class="text-center mt-3 font-bold text-lg text-gray-800"></p>
+        </div>
+    </div>
+    
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed top-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg opacity-0 transform translate-y-10 transition-all duration-300 z-50">
+        <p id="toast-message"></p>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        // ОНОВЛЕНЕ ПОСИЛАННЯ: orderFLP-19 / Прайс для заказника (19).xls
+        const GITHUB_EXCEL_URL = 'https://raw.githubusercontent.com/YuriyBuz/orderFLP-19-/main/%D0%9F%D1%80%D0%B0%D0%B9%D1%81%20%D0%B4%D0%BB%D1%8F%20%D0%B7%D0%B0%D0%BA%D0%B0%D0%B7%D0%BD%D0%B8%D0%BA%D0%B0%20(19).xls';
+        
+        let productGroups = [];
+        let flatProducts = [];
+        let order = {};
+        let customerInfo = {};
+        
+        const el = (selector) => document.querySelector(selector);
+
+        function renderProducts() {
+            const productList = el('#product-list');
+            el('#loading-indicator')?.remove();
+
+            if (productGroups.length === 0) {
+                productList.innerHTML = `<div class="text-center py-10 text-gray-500"><p>Не вдалося завантажити товари. Перевірте посилання на файл або структуру даних у файлі Excel.</p></div>`;
+                return;
+            }
+
+            productList.innerHTML = productGroups.map(group => {
+                if (!group.products || group.products.length === 0) return '';
+                
+                const productItemsHTML = group.products.map(p => {
+                    const itemOrder = order[p.sku] || { quantity: 0, unit: 'box' };
+                    const quantityValue = itemOrder.quantity > 0 ? itemOrder.quantity : '';
+                    const totalPcs = itemOrder.quantity * p.perBox;
+                    const subtotal = itemOrder.quantity * p.price * p.perBox;
+                    
+                    return `
+                    <div class="bg-white border border-gray-200 rounded-xl shadow-md hover:shadow-lg transition-shadow p-4 grid grid-cols-1 md:grid-cols-12 gap-x-4 gap-y-3 items-center product-item cursor-pointer" data-sku="${p.sku}" data-name="${p.name.toLowerCase()}" data-image-url="${p.imageUrl || ''}">
+                        <!-- Product Info (Col 1-8) -->
+                        <div class="col-span-1 md:col-span-8 flex flex-col sm:flex-row sm:items-center space-x-3">
+                            <img src="${p.imageUrl}" alt="${p.name}" class="w-12 h-12 object-contain rounded-lg shadow-inner mr-2 sm:mr-0" onerror="this.onerror=null;this.src='https://placehold.co/48x48/60A5FA/FFF?text=ITEM';">
+                            <div>
+                                <p class="font-bold text-lg text-gray-800">${p.name}</p>
+                                <p class="text-sm text-gray-600 space-x-2">
+                                    <span class="font-mono">Арт: ${p.sku}</span>
+                                    <span>|</span>
+                                    <span>В ящ: <span class="font-medium text-blue-800">${p.perBox} шт</span></span>
+                                </p>
+                            </div>
+                        </div>
+                        
+                        <!-- Order Input & Subtotal (Col 9-12) -->
+                        <div class="col-span-1 md:col-span-4 flex items-center justify-between">
+                            <div class="flex items-center space-x-2">
+                                <input type="number" class="quantity-input w-16 md:w-20 p-2 border border-blue-400 rounded-lg text-center font-semibold focus:border-blue-600 focus:ring-1 focus:ring-blue-600" placeholder="0" min="0" value="${quantityValue}" data-sku="${p.sku}">
+                                <span class="text-base text-gray-600">ящ.</span>
+                                <div class="flex flex-col items-center ml-2">
+                                    <span class="text-xs text-gray-500">Кількість</span>
+                                    <span class="font-medium total-pcs-display text-sm text-blue-700">${totalPcs} шт</span>
+                                </div>
+                            </div>
+                            <div class="flex flex-col items-end">
+                                <span class="text-sm font-semibold text-gray-700">Ціна: ${p.price.toFixed(2)} грн</span>
+                                <div class="text-right text-xl font-bold text-blue-600 subtotal">
+                                    ${subtotal.toFixed(2)}
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+
+                return `
+                <div class="product-group">
+                    <h2 class="text-xl font-extrabold mb-3 text-gray-700 sticky top-24 md:top-28 p-3 bg-gray-100/90 border-b-2 border-blue-400 backdrop-blur-sm rounded-lg z-10 shadow-sm">${group.groupName}</h2>
+                    <div class="space-y-3">
+                        ${productItemsHTML}
+                    </div>
+                </div>
+                `;
+            }).join('');
+
+            updateGrandTotal();
+            el('#order-details-section').classList.remove('hidden');
+            // Animate footer into view
+            el('#footer-bar').classList.remove('translate-y-full');
+        }
+        
+        // --- Core Loading Function ---
+        async function loadProductsFromGitHub() {
+            if (!GITHUB_EXCEL_URL || GITHUB_EXCEL_URL.includes('username/repo')) {
+                throw new Error('URL до файлу не налаштовано!');
+            }
+            
+            // Fetch the Excel file
+            const response = await fetch(GITHUB_EXCEL_URL);
+            if (!response.ok) throw new Error(`Помилка мережі: ${response.status} ${response.statusText}`);
+            
+            const arrayBuffer = await response.arrayBuffer();
+            const data = new Uint8Array(arrayBuffer);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            // Read data as array of arrays, skipping the header row for iteration simplicity
+            const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); 
+            
+            let currentGroup = null;
+            productGroups = [];
+
+            // Parse rows
+            json.slice(1).forEach(row => {
+                if (!row || row.length === 0) return;
+
+                // Structure assumption: 
+                // Group Header: Only column A is filled
+                // Product: Columns A, B, C, D are filled (SKU, Name, PerBox, Price)
+                
+                // Group Header detection
+                const isGroupHeader = row[0] && !row[1] && !row[2] && !row[3];
+                // Product row detection (assuming required fields are present)
+                const isProduct = row[0] && row[1] && row[2] && row[3] !== undefined;
+
+                if (isGroupHeader) {
+                    currentGroup = { groupName: String(row[0] || '').trim(), products: [] };
+                    productGroups.push(currentGroup);
+                } else if (isProduct) {
+                    const product = {
+                        sku: String(row[0] || ''),
+                        name: String(row[1] || 'Без назви'),
+                        perBox: parseInt(row[2], 10) || 1, // Column C (index 2)
+                        price: parseFloat(String(row[3]).replace(',', '.')) || 0.00, // Column D (index 3)
+                        imageUrl: String(row[4] || '') // Column E (index 4)
+                    };
+
+                    if (product.sku && product.name) {
+                        if (!currentGroup) {
+                            currentGroup = { groupName: 'Інші товари', products: [] };
+                            productGroups.push(currentGroup);
+                        }
+                        currentGroup.products.push(product);
+                    }
+                }
+            });
+
+            flatProducts = productGroups.flatMap(group => group.products);
+        }
+
+        function updateGrandTotal() {
+            const total = flatProducts.reduce((acc, p) => {
+                const itemOrder = order[p.sku] || { quantity: 0 };
+                return acc + (itemOrder.quantity * p.price * p.perBox);
+            }, 0);
+            el('#grand-total').textContent = `${total.toFixed(2)} грн`;
+        }
+        
+        function handleQuantityChange(e) {
+            const target = e.target;
+            if (!target.classList.contains('quantity-input')) return;
+            
+            const sku = target.dataset.sku;
+            let value = parseInt(target.value, 10) || 0;
+            if (value < 0) value = 0;
+            
+            // Update input value to handle 0 and negative inputs visually
+            target.value = value > 0 ? value : ''; 
+
+            order[sku] = { quantity: value, unit: 'box' };
+            const product = flatProducts.find(p => p.sku === sku);
+            if (product) {
+                const parent = target.closest('.product-item');
+                parent.querySelector('.total-pcs-display').textContent = `${(value * product.perBox)} шт`;
+                parent.querySelector('.subtotal').textContent = (value * product.price * product.perBox).toFixed(2);
+            }
+            updateGrandTotal();
+            saveStateToLocalStorage();
+        }
+
+        function handleCustomerInfoChange(e) {
+             const keyMap = { 'delivery-address': 'address', 'contact-person': 'contact', 'order-comment': 'comment' };
+             const id = e.target.id;
+             customerInfo[keyMap[id]] = e.target.value;
+             saveStateToLocalStorage();
+        }
+
+        function saveStateToLocalStorage() {
+            try {
+                // Remove zero-quantity items before saving
+                const cleanedOrder = Object.fromEntries(
+                    Object.entries(order).filter(([sku, details]) => details.quantity > 0)
+                );
+                localStorage.setItem('orderAppState', JSON.stringify({ order: cleanedOrder, customerInfo }));
+            } catch (error) {
+                 console.error("Error saving state to localStorage:", error);
+            }
+        }
+
+        function loadStateFromLocalStorage() {
+            try {
+                const stateJSON = localStorage.getItem('orderAppState');
+                if (!stateJSON) return;
+
+                const state = JSON.parse(stateJSON);
+                if (state) {
+                    order = state.order || {};
+                    customerInfo = state.customerInfo || {};
+                    el('#delivery-address').value = customerInfo.address || '';
+                    el('#contact-person').value = customerInfo.contact || '';
+                    el('#order-comment').value = customerInfo.comment || '';
+                }
+            } catch (error) {
+                console.error("Could not load state from localStorage:", error);
+                localStorage.removeItem('orderAppState');
+                order = {};
+                customerInfo = {};
+            }
+        }
+        
+        function getActiveOrderItems() {
+            return Object.entries(order).map(([sku, details]) => {
+                const product = flatProducts.find(p => p.sku === sku);
+                if (!product || !details || details.quantity <= 0) return null;
+                const totalQuantity = details.quantity * product.perBox;
+                return {
+                    sku: product.sku, name: product.name, price: product.price,
+                    quantity: details.quantity, unit: 'box', total_pcs: totalQuantity,
+                    subtotal: totalQuantity * product.price
+                };
+            }).filter(Boolean);
+        }
+        
+        function resetOrder() {
+            // Confirmation logic placeholder
+            if (!confirm("Ви впевнені, що хочете скинути все замовлення?")) return;
+            
+            order = {};
+            customerInfo = {};
+            el('#delivery-address').value = '';
+            el('#contact-person').value = '';
+            el('#order-comment').value = '';
+            saveStateToLocalStorage();
+            renderProducts();
+            showToast('Замовлення скинуто!', 'success');
+        }
+
+        async function shareOrder() {
+            const activeOrderItems = getActiveOrderItems();
+            if (activeOrderItems.length === 0) return showToast('Замовлення порожнє, нічого надсилати.', 'error');
+            
+            customerInfo.address = el('#delivery-address').value;
+            customerInfo.contact = el('#contact-person').value;
+            customerInfo.comment = el('#order-comment').value;
+
+            if (!customerInfo.address || !customerInfo.contact) return showToast('Будь ласка, заповніть адресу та контактну особу.', 'error');
+
+            const grandTotal = activeOrderItems.reduce((acc, item) => acc + item.subtotal, 0);
+            
+            let orderText = `*НОВЕ ЗАМОВЛЕННЯ*\n\n` +
+                             `*Адреса:* ${customerInfo.address}\n` +
+                             `*Контакт:* ${customerInfo.contact}\n` +
+                             (customerInfo.comment ? `*Коментар:* ${customerInfo.comment}\n` : '') +
+                             `--------------------\n` +
+                             activeOrderItems.map(item => `• ${item.name} (ціна: ${item.price.toFixed(2)} грн) - ${item.quantity} ящ. (${item.total_pcs} шт.)`).join('\n') +
+                             `\n--------------------\n` +
+                             `*Всього до сплати: ${grandTotal.toFixed(2)} грн*`;
+
+            // Use the navigator.share API if available (for mobile/native sharing)
+            if (navigator.share) {
+                try {
+                    await navigator.share({
+                        title: 'Замовлення Food Line Production',
+                        text: orderText,
+                    });
+                } catch (error) {
+                    // Fallback to clipboard if sharing is cancelled or fails
+                    console.error('Sharing failed, falling back to clipboard:', error);
+                    copyToClipboard(orderText);
+                }
+            } else {
+                // Fallback for desktop browsers
+                copyToClipboard(orderText);
+            }
+        }
+        
+        function copyToClipboard(text) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed'; // Avoid scrolling to bottom
+            textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                showToast('Текст замовлення скопійовано!', 'success');
+            } catch (err) {
+                showToast('Не вдалося скопіювати текст.', 'error');
+            }
+            document.body.removeChild(textArea);
+        }
+
+        function filterProducts() {
+            const searchTerm = el('#search-input').value.toLowerCase();
+            const clearBtn = el('#search-clear-btn');
+            
+            clearBtn.classList.toggle('hidden', searchTerm.length === 0);
+
+            document.querySelectorAll('.product-group').forEach(groupEl => {
+                let visibleProductsInGroup = 0;
+                groupEl.querySelectorAll('.product-item').forEach(item => {
+                    const name = item.dataset.name || '';
+                    const isVisible = name.includes(searchTerm);
+                    item.classList.toggle('hidden', !isVisible);
+                    if (isVisible) {
+                        visibleProductsInGroup++;
+                    }
+                });
+                // Hide group header if no products are visible and search term is active
+                groupEl.classList.toggle('hidden', visibleProductsInGroup === 0 && searchTerm.length > 0);
+            });
+        }
+
+        // --- Event Listeners & Initialization ---
+        function setupEventListeners() {
+            el('#product-list').addEventListener('input', handleQuantityChange);
+
+            // Image Modal Listener
+            el('#product-list').addEventListener('click', (e) => {
+                const item = e.target.closest('.product-item');
+                // Check if the click was not on the input itself
+                if (item && !e.target.closest('input')) {
+                    const product = flatProducts.find(p => p.sku === item.dataset.sku);
+                    if (!product) return;
+                    
+                    const imageUrl = item.dataset.imageUrl || `https://placehold.co/600x400/60A5FA/FFF?text=${encodeURIComponent(product.name)}`;
+
+                    el('#modal-img').src = imageUrl;
+                    el('#modal-caption').textContent = product.name;
+                    el('#image-modal').classList.remove('hidden');
+                }
+            });
+
+            el('#close-modal').addEventListener('click', () => el('#image-modal').classList.add('hidden'));
+            el('#image-modal').addEventListener('click', (e) => {
+                // Close modal only if background is clicked
+                if(e.target === el('#image-modal')) el('#image-modal').classList.add('hidden');
+            });
+
+            // Customer Info Listeners
+            ['delivery-address', 'contact-person', 'order-comment'].forEach(id => {
+                el(`#${id}`).addEventListener('input', handleCustomerInfoChange);
+            });
+            
+            // Footer Action Listeners
+            el('#share-order').addEventListener('click', shareOrder);
+            el('#reset-order').addEventListener('click', resetOrder);
+
+            // Search listeners
+            el('#search-input').addEventListener('input', filterProducts);
+            el('#search-clear-btn').addEventListener('click', () => {
+                el('#search-input').value = '';
+                filterProducts();
+                el('#search-input').focus();
+            });
+        }
+        
+        let toastTimeout;
+        function showToast(message, type = 'success') {
+            clearTimeout(toastTimeout);
+            const toast = el('#toast');
+            toast.textContent = message;
+            
+            const baseClasses = 'fixed top-5 right-5 text-white py-3 px-6 rounded-xl shadow-xl transition-all duration-300 z-50 font-medium';
+            const colorClass = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+            
+            toast.className = `${baseClasses} ${colorClass} opacity-0 transform translate-y-10`;
+            
+            // Force reflow to restart animation
+            void toast.offsetWidth; 
+            
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateY(0)';
+            
+            toastTimeout = setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(2.5rem)';
+            }, 3000);
+        }
+
+        async function main() {
+            const loadingIndicator = el('#loading-indicator p');
+            
+            function updateStatus(message) {
+                if (loadingIndicator) loadingIndicator.textContent = message;
+                console.log(message);
+            }
+
+            try {
+                updateStatus('Налаштування інтерфейсу...');
+                el('#current-date').textContent = new Date().toLocaleDateString('uk-UA', { weekday: 'short', year: 'numeric', month: 'long', day: 'numeric' });
+                loadStateFromLocalStorage();
+                setupEventListeners();
+                
+                updateStatus('Завантаження товарів з зовнішнього джерела...');
+                await loadProductsFromGitHub();
+                
+                updateStatus('Відображення товарів...');
+                renderProducts();
+
+            } catch (error) {
+                console.error("CRITICAL ERROR during app initialization:", error);
+                if (loadingIndicator) {
+                     loadingIndicator.parentElement.innerHTML = `<p class="text-red-600 font-semibold">Сталася критична помилка завантаження даних</p><p class="text-xs text-gray-500 mt-1">${error.message}. Перевірте URL або структуру файлу Excel.</p>`;
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', main);
+    </script>
+</body>
+</html>
