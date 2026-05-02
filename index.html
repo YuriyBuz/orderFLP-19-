@@ -118,69 +118,41 @@
         <!-- Message will be inserted here directly -->
     </div>
         
-    <!-- НОВАЯ УЛУЧШЕННАЯ ФУНКЦИЯ ДЛЯ ОБРАБОТКИ ССЫЛОК -->
     <script>
     /**
      * Преобразует разные форматы ссылок GitHub (полные, частичные, относительные)
      * в один, правильный и полностью закодированный URL-адрес для изображения.
-     * @param {string} url - Исходный URL из Excel-файла.
-     * @returns {string} - Отформатированный URL.
      */
     function formatGitHubImageUrl(url) {
-        if (!url || typeof url !== 'string') {
-            return '';
-        }
-
+        if (!url || typeof url !== 'string') return '';
         let finalUrl = url;
 
-        // Сценарий 1: Ссылка относительная (не начинается с http).
-        // Собираем полный "сырой" URL с нуля.
         if (!url.startsWith('http')) {
-            // Очищаем от возможных префиксов типа "blob:"
             const imagesMarker = 'images/';
             const pathStartIndex = url.indexOf(imagesMarker);
             if (pathStartIndex !== -1) {
                 const cleanedPath = url.substring(pathStartIndex);
-                // ИЗМЕНЕНО: Указываем на репозиторий orderFLP-13- для картинок
                 finalUrl = 'https://raw.githubusercontent.com/YuriyBuz/orderFLP-13-/main/' + cleanedPath;
             } else {
-                return ''; // Не можем обработать такой относительный путь
+                return ''; 
             }
         }
-        // Сценарий 2: Ссылка на веб-страницу GitHub.
-        // Превращаем ее в "сырую" ссылку.
         else if (url.startsWith('https://github.com/')) {
             finalUrl = url.replace('https://github.com/', 'https://raw.githubusercontent.com/').replace('/blob/', '/');
         }
 
-        // ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: Убедимся, что любая полная ссылка на GitHub
-        // указывает на правильный репозиторий с картинками.
-        if (finalUrl.includes('/YuriyBuz/orderFLP-19-/')) {
-             finalUrl = finalUrl.replace('/YuriyBuz/orderFLP-19-/', '/YuriyBuz/orderFLP-13-/');
-        }
-
-
-        // --- Финальное кодирование пути (важно для кириллицы и пробелов) ---
         const mainMarker = '/main/';
         const mainIndex = finalUrl.indexOf(mainMarker);
 
-        // Если это не ссылка на GitHub (например, foodline-production.com), просто возвращаем ее.
-        if (mainIndex === -1) {
-            return finalUrl;
-        }
+        if (mainIndex === -1) return finalUrl;
 
         const baseUrl = finalUrl.substring(0, mainIndex + mainMarker.length);
         const pathPart = finalUrl.substring(mainIndex + mainMarker.length);
 
-        // Кодируем каждую часть пути отдельно, чтобы сохранить '/'
         const encodedPath = pathPart.split('/')
             .map(segment => {
-                try {
-                    // Сначала декодируем, на случай если ссылка уже была частично закодирована
-                    return decodeURIComponent(segment);
-                } catch (e) {
-                    return segment; // Если некорректное кодирование, оставляем как есть
-                }
+                try { return decodeURIComponent(segment); } 
+                catch (e) { return segment; }
             })
             .map(segment => encodeURIComponent(segment))
             .join('/');
@@ -191,8 +163,12 @@
 
     <script>
     // --- Configuration ---
-    // ОНОВЛЕНЕ ПОСИЛАННЯ: orderFLP-19 / Прайс для заказника (19).xls
-    const GITHUB_EXCEL_URL = 'https://raw.githubusercontent.com/YuriyBuz/orderFLP-19-/main/%D0%9F%D1%80%D0%B0%D0%B9%D1%81%20%D0%B4%D0%BB%D1%8F%20%D0%B7%D0%B0%D0%BA%D0%B0%D0%B7%D0%BD%D0%B8%D0%BA%D0%B0%20(19).xls';
+    // ID вашої Google Таблиці з посилання: https://docs.google.com/spreadsheets/d/1JH8p91B-kykGNcJcr4PzHDP8i_rFPQNZFIr2jDbdTwc/...
+    const GOOGLE_SHEET_ID = '1JH8p91B-kykGNcJcr4PzHDP8i_rFPQNZFIr2jDbdTwc';
+    const GID = '0'; // ID конкретного листа (з кінця вашого посилання)
+    
+    // Формуємо URL для завантаження таблиці у форматі Excel (xlsx) напряму від Google
+    const GOOGLE_SHEETS_EXPORT_URL = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/export?format=xlsx&gid=${GID}`;
     
     let productGroups = [];
     let flatProducts = [];
@@ -206,7 +182,7 @@
         el('#loading-indicator')?.remove();
 
         if (productGroups.length === 0) {
-            productList.innerHTML = `<div class="text-center py-10 text-gray-500"><p>Не вдалося завантажити товари. Перевірте посилання на файл або структуру даних у файлі Excel.</p></div>`;
+            productList.innerHTML = `<div class="text-center py-10 text-gray-500"><p>Не вдалося завантажити товари. Перевірте посилання на таблицю або чи відкритий до неї доступ.</p></div>`;
             return;
         }
 
@@ -266,70 +242,56 @@
 
         updateGrandTotal();
         el('#order-details-section').classList.remove('hidden');
-        // Animate footer into view
         el('#footer-bar').classList.remove('translate-y-full');
     }
     
     // --- Core Loading Function ---
-    async function loadProductsFromGitHub() {
-        if (!GITHUB_EXCEL_URL || GITHUB_EXCEL_URL.includes('username/repo')) {
-            throw new Error('URL до файлу не налаштовано!');
-        }
-        
-        // Fetch the Excel file with a cache-busting parameter
-        const response = await fetch(`${GITHUB_EXCEL_URL}?t=${new Date().getTime()}`);
+    async function loadProductsFromGoogleSheet() {
+        // Додаємо timestamp щоб запобігти кешуванню браузером
+        const response = await fetch(`${GOOGLE_SHEETS_EXPORT_URL}&t=${new Date().getTime()}`);
         if (!response.ok) throw new Error(`Помилка мережі: ${response.status} ${response.statusText}`);
         
         const arrayBuffer = await response.arrayBuffer();
         const data = new Uint8Array(arrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
-        
-        // УЛУЧШЕННАЯ ПРОВЕРКА: Проверяем, что в файле есть хотя бы один лист.
-        if (!workbook || !workbook.SheetNames || workbook.SheetNames.length === 0) {
-            throw new Error('Файл Excel порожній або пошкоджений. Не знайдено жодного аркуша.');
-        }
-
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
-        // Read data as array of arrays, skipping the header row for iteration simplicity
+        
         const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); 
         
         let currentGroup = null;
         productGroups = [];
 
-        // Parse rows
-        json.slice(1).forEach(row => {
+        json.forEach((row) => {
             if (!row || row.length === 0) return;
 
-            // Structure assumption: 
-            // Group Header: Only column A is filled
-            // Product: Columns A, B, C, D are filled (SKU, Name, PerBox, Price)
-            
-            // Group Header detection
-            const isGroupHeader = row[0] && !row[1] && !row[2] && !row[3];
-            // Product row detection (assuming required fields are present)
-            const isProduct = row[0] && row[1] && row[2] && row[3] !== undefined;
+            // Зчитуємо колонки A та B для визначення типу рядка
+            const colA = String(row[0] || '').trim();
+            const colB = String(row[1] || '').trim();
 
-            if (isGroupHeader) {
-                currentGroup = { groupName: String(row[0] || '').trim(), products: [] };
+            // Ігноруємо шапку таблиці
+            if (colA === 'Артикул' || colA === '') return;
+
+            // Якщо є колонка A, але немає колонки B — це заголовок групи
+            if (colA && !colB) {
+                currentGroup = { groupName: colA, products: [] };
                 productGroups.push(currentGroup);
-            } else if (isProduct) {
+            } 
+            // Якщо є і Артикул (A) і Найменування (B) — це товар
+            else if (colA && colB) {
                 const product = {
-                    sku: String(row[0] || ''),
-                    name: String(row[1] || 'Без назви'),
-                    perBox: parseInt(row[2], 10) || 1, // Column C (index 2)
-                    price: parseFloat(String(row[3]).replace(',', '.')) || 0.00, // Column D (index 3)
-                    // ИСПОЛЬЗУЕМ НОВУЮ НАДЕЖНУЮ ФУНКЦИЮ
-                    imageUrl: formatGitHubImageUrl(String(row[4] || ''))
+                    sku: colA,                                                  // Колоннка A (індекс 0)
+                    name: colB,                                                 // Колонка B (індекс 1)
+                    perBox: parseInt(row[2], 10) || 1,                          // Колонка C (індекс 2)
+                    imageUrl: formatGitHubImageUrl(String(row[3] || '')),       // Колонка D (індекс 3) - URL Зображення
+                    price: parseFloat(String(row[5] || '0').replace(',', '.')) || 0.00 // Колонка F (індекс 5) - Ціна
                 };
 
-                if (product.sku && product.name) {
-                    if (!currentGroup) {
-                        currentGroup = { groupName: 'Інші товари', products: [] };
-                        productGroups.push(currentGroup);
-                    }
-                    currentGroup.products.push(product);
+                if (!currentGroup) {
+                    currentGroup = { groupName: 'Інші товари', products: [] };
+                    productGroups.push(currentGroup);
                 }
+                currentGroup.products.push(product);
             }
         });
 
@@ -352,7 +314,6 @@
         let value = parseInt(target.value, 10) || 0;
         if (value < 0) value = 0;
         
-        // Update input value to handle 0 and negative inputs visually
         target.value = value > 0 ? value : ''; 
 
         order[sku] = { quantity: value, unit: 'box' };
@@ -375,7 +336,6 @@
 
     function saveStateToLocalStorage() {
         try {
-            // Remove zero-quantity items before saving
             const cleanedOrder = Object.fromEntries(
                 Object.entries(order).filter(([sku, details]) => details.quantity > 0)
             );
@@ -453,7 +413,6 @@
                               `\n--------------------\n` +
                               `*Всього до сплати: ${grandTotal.toFixed(2)} грн*`;
 
-        // Use the navigator.share API if available (for mobile/native sharing)
         if (navigator.share) {
             try {
                 await navigator.share({
@@ -461,12 +420,10 @@
                     text: orderText,
                 });
             } catch (error) {
-                // Fallback to clipboard if sharing is cancelled or fails
                 console.error('Sharing failed, falling back to clipboard:', error);
                 copyToClipboard(orderText);
             }
         } else {
-            // Fallback for desktop browsers
             copyToClipboard(orderText);
         }
     }
@@ -474,7 +431,7 @@
     function copyToClipboard(text) {
         const textArea = document.createElement('textarea');
         textArea.value = text;
-        textArea.style.position = 'fixed'; // Avoid scrolling to bottom
+        textArea.style.position = 'fixed'; 
         textArea.style.opacity = '0';
         document.body.appendChild(textArea);
         textArea.focus();
@@ -504,19 +461,15 @@
                     visibleProductsInGroup++;
                 }
             });
-            // Hide group header if no products are visible and search term is active
             groupEl.classList.toggle('hidden', visibleProductsInGroup === 0 && searchTerm.length > 0);
         });
     }
 
-    // --- Event Listeners & Initialization ---
     function setupEventListeners() {
         el('#product-list').addEventListener('input', handleQuantityChange);
 
-        // Image Modal Listener
         el('#product-list').addEventListener('click', (e) => {
             const item = e.target.closest('.product-item');
-            // Check if the click was not on the input itself
             if (item && !e.target.closest('input')) {
                 const product = flatProducts.find(p => p.sku === item.dataset.sku);
                 if (!product) return;
@@ -531,20 +484,16 @@
 
         el('#close-modal').addEventListener('click', () => el('#image-modal').classList.add('hidden'));
         el('#image-modal').addEventListener('click', (e) => {
-            // Close modal only if background is clicked
             if(e.target === el('#image-modal')) el('#image-modal').classList.add('hidden');
         });
 
-        // Customer Info Listeners
         ['delivery-address', 'contact-person', 'order-comment'].forEach(id => {
             el(`#${id}`).addEventListener('input', handleCustomerInfoChange);
         });
         
-        // Footer Action Listeners
         el('#share-order').addEventListener('click', shareOrder);
         el('#reset-order').addEventListener('click', resetOrder);
 
-        // Search listeners
         el('#search-input').addEventListener('input', filterProducts);
         el('#search-clear-btn').addEventListener('click', () => {
             el('#search-input').value = '';
@@ -564,7 +513,6 @@
         
         toast.className = `${baseClasses} ${colorClass} opacity-0 transform translate-y-10`;
         
-        // Force reflow to restart animation
         void toast.offsetWidth; 
         
         toast.style.opacity = '1';
@@ -590,30 +538,26 @@
             loadStateFromLocalStorage();
             setupEventListeners();
             
-            // --- Auto-hiding Header Logic ---
             const headerContainer = el('#header-container');
             let lastScrollTop = 0;
             window.addEventListener('scroll', () => {
                 let scrollTop = window.pageYOffset || document.documentElement.scrollTop;
                 if (scrollTop > lastScrollTop && scrollTop > headerContainer.offsetHeight) {
-                    // Scroll Down
                     headerContainer.classList.add('-translate-y-full');
                     document.querySelectorAll('.product-group h2').forEach(h2 => {
                         h2.style.top = '0px';
                     });
                 } else {
-                    // Scroll Up
                     headerContainer.classList.remove('-translate-y-full');
                     document.querySelectorAll('.product-group h2').forEach(h2 => {
-                        h2.style.top = ''; // Reset style to use Tailwind classes
+                        h2.style.top = ''; 
                     });
                 }
                 lastScrollTop = scrollTop <= 0 ? 0 : scrollTop;
             }, { passive: true });
 
-
-            updateStatus('Завантаження товарів з зовнішнього джерела...');
-            await loadProductsFromGitHub();
+            updateStatus('Завантаження товарів з Google Таблиці...');
+            await loadProductsFromGoogleSheet();
             
             updateStatus('Відображення товарів...');
             renderProducts();
@@ -621,7 +565,7 @@
         } catch (error) {
             console.error("CRITICAL ERROR during app initialization:", error);
             if (loadingIndicator) {
-                 loadingIndicator.parentElement.innerHTML = `<p class="text-red-600 font-semibold">Сталася критична помилка завантаження даних</p><p class="text-xs text-gray-500 mt-1">${error.message}. Перевірте URL або структуру файлу Excel.</p>`;
+                 loadingIndicator.parentElement.innerHTML = `<p class="text-red-600 font-semibold">Сталася критична помилка завантаження даних</p><p class="text-xs text-gray-500 mt-1">${error.message}. Перевірте чи відкритий доступ до Google Таблиці за посиланням.</p>`;
             }
         }
     }
@@ -630,4 +574,3 @@
     </script>
 </body>
 </html>
-
