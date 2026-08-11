@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Замовлення соусів Food line Production</title>
+    <title>Замовлення соусів Food line Production • FLP-19</title>
     <link rel="icon" href="https://foodline-production.com/wp-content/uploads/2021/10/cropped-favicon-32x32.png" sizes="32x32">
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Використовуємо XLSX для парсингу Excel файлу -->
@@ -113,6 +113,22 @@
         </div>
     </div>
     
+    <!-- Share Fallback: на десктопі Web Share API ненадійний -->
+    <div id="share-fallback" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 hidden z-50">
+        <div class="bg-white rounded-xl p-6 max-w-xl w-full relative shadow-2xl space-y-4">
+            <button id="share-fallback-close" class="absolute -top-3 -right-3 text-white bg-gray-900 rounded-full h-10 w-10 text-2xl font-bold flex items-center justify-center border-2 border-white transition-transform hover:scale-110">&times;</button>
+            <h3 class="text-xl font-bold text-gray-800">Поділитися замовленням</h3>
+            <p class="text-sm text-gray-600">Замовлення вже пішло на пошту й у таблицю. Текст скопійовано в буфер — за потреби продублюйте вручну.</p>
+            <textarea id="share-fallback-text" rows="9" readonly class="w-full p-3 border border-gray-300 rounded-lg font-mono text-xs bg-gray-50"></textarea>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <button id="share-copy-again" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-sm transition-colors">Копіювати</button>
+                <a id="share-telegram" href="#" target="_blank" rel="noopener" class="px-3 py-2 bg-sky-500 hover:bg-sky-600 text-white font-semibold rounded-lg text-sm text-center transition-colors">Telegram</a>
+                <a id="share-viber" href="#" class="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg text-sm text-center transition-colors">Viber</a>
+                <a id="share-email" href="#" class="px-3 py-2 bg-gray-700 hover:bg-gray-800 text-white font-semibold rounded-lg text-sm text-center transition-colors">Пошта</a>
+            </div>
+        </div>
+    </div>
+
     <!-- Notification Toast -->
     <div id="toast" class="fixed top-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg opacity-0 transform translate-y-10 transition-all duration-300 z-50">
         <!-- Message will be inserted here directly -->
@@ -170,6 +186,17 @@
     // Формуємо URL для завантаження таблиці у форматі Excel (xlsx) напряму від Google
     const GOOGLE_SHEETS_EXPORT_URL = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/export?format=xlsx&gid=${GID}`;
     
+
+    // === НАЛАШТУВАННЯ ВІДПРАВКИ ЗАМОВЛЕННЯ (Apps Script) =====================
+    // 1) Розгорніть Code.gs як Web App і вставте сюди URL, що закінчується на /exec
+    const BACKEND_URL    = 'https://script.google.com/macros/s/AKfycbxzDduDw5opW-UqzbvN3K_N3cQLnsD1SMeCGOcVNvp6GqOH80H25jZNuSXJaXnvD30hrA/exec';
+    // 2) Мітка прайсу — потрапляє в лист і в колонку "Прайс" таблиці
+    const APP_TAG        = 'FLP-19';
+    // 3) Має ТОЧНО збігатися з CONFIG.SECRET у Code.gs
+    const SHARED_SECRET  = 'FLP-2026-Kyiv-7x';
+    const PENDING_KEY    = 'flpPendingOrders';
+    // =========================================================================
+
     let productGroups = [];
     let flatProducts = [];
     let order = {};
@@ -392,57 +419,228 @@
         showToast('Замовлення скасовано!', 'success');
     }
 
-    async function shareOrder() {
+    // ---- Відправка замовлення на сервер (пошта + Google Таблиця) ----
+
+    function buildOrderText(items) {
+        const grandTotal = items.reduce((acc, item) => acc + item.subtotal, 0);
+        return `*НОВЕ ЗАМОВЛЕННЯ*\n\n` +
+               `*Адреса:* ${customerInfo.address}\n` +
+               `*Контакт:* ${customerInfo.contact}\n` +
+               (customerInfo.comment ? `*Коментар:* ${customerInfo.comment}\n` : '') +
+               `--------------------\n` +
+               items.map(item => `• ${item.name} (ціна: ${item.price.toFixed(2)} грн) - ${item.quantity} ящ. (${item.total_pcs} шт.)`).join('\n') +
+               `\n--------------------\n` +
+               `*Всього до сплати: ${grandTotal.toFixed(2)} грн*`;
+    }
+
+    function newClientOrderId() {
+        if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+        return 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+    }
+
+    function buildOrderPayload(items) {
+        const sum = items.reduce((a, i) => a + i.subtotal, 0);
+        return {
+            secret: SHARED_SECRET,
+            app: APP_TAG,
+            clientOrderId: newClientOrderId(),
+            createdAt: new Date().toISOString(),
+            customer: {
+                address: customerInfo.address || '',
+                contact: customerInfo.contact || '',
+                comment: customerInfo.comment || ''
+            },
+            items: items,
+            totals: {
+                positions: items.length,
+                boxes: items.reduce((a, i) => a + i.quantity, 0),
+                pcs:   items.reduce((a, i) => a + i.total_pcs, 0),
+                sum:   Math.round(sum * 100) / 100
+            },
+            userAgent: navigator.userAgent
+        };
+    }
+
+    async function postOrder(payload) {
+        if (!BACKEND_URL || BACKEND_URL.indexOf('PASTE_WEB_APP_URL') === 0) {
+            throw new Error('BACKEND_URL не налаштовано');
+        }
+        // text/plain робить запит "простим": браузер не шле preflight OPTIONS,
+        // який Apps Script не обробляє. mode:'no-cors' НЕ використовуємо —
+        // інакше відповідь недоступна і помилки стають невидимими.
+        const res = await fetch(BACKEND_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload),
+            redirect: 'follow'
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if (!data || data.ok !== true) throw new Error((data && data.error) || 'Сервер відхилив замовлення');
+        return data;
+    }
+
+    function queuePendingOrder(payload) {
+        try {
+            const q = JSON.parse(localStorage.getItem(PENDING_KEY) || '[]');
+            q.push(payload);
+            localStorage.setItem(PENDING_KEY, JSON.stringify(q.slice(-20)));
+        } catch (e) { console.error('Не вдалося зберегти замовлення в чергу:', e); }
+    }
+
+    async function flushPendingOrders() {
+        let q = [];
+        try { q = JSON.parse(localStorage.getItem(PENDING_KEY) || '[]'); } catch (e) { return; }
+        if (!q.length) return;
+        const rest = [];
+        for (const p of q) {
+            try { await postOrder(p); } catch (e) { rest.push(p); }
+        }
+        localStorage.setItem(PENDING_KEY, JSON.stringify(rest));
+        const sent = q.length - rest.length;
+        if (sent > 0) showToast(`Надіслано відкладених замовлень: ${sent}`, 'success');
+    }
+
+    function clearOrderAfterSend() {
+        order = {};
+        customerInfo.comment = '';
+        el('#order-comment').value = '';
+        saveStateToLocalStorage();
+        renderProducts();
+    }
+
+    let isSending = false;
+
+    /**
+     * Одна кнопка — три дії:
+     *   1) тиха відправка на Apps Script (пошта + Google Таблиця)
+     *   2) копіювання тексту в буфер обміну
+     *   3) відкриття системного вікна "Поділитися"
+     *
+     * ПОРЯДОК КРИТИЧНИЙ. navigator.share() і копіювання працюють лише поки живий
+     * "жест користувача". Будь-який await ДО них — і Safari/Chrome кинуть
+     * NotAllowedError. Тому fetch стартуємо, але НЕ чекаємо: результат
+     * обробляємо через .then/.catch уже після відкриття "Поділитися".
+     */
+    async function submitOrder() {
+        if (isSending) return;
+
         const activeOrderItems = getActiveOrderItems();
         if (activeOrderItems.length === 0) return showToast('Замовлення порожнє, нічого надсилати.', 'error');
-        
-        customerInfo.address = el('#delivery-address').value;
-        customerInfo.contact = el('#contact-person').value;
-        customerInfo.comment = el('#order-comment').value;
 
-        if (!customerInfo.address || !customerInfo.contact) return showToast('Будь ласка, заповніть адресу та контактну особу.', 'error');
+        customerInfo.address = el('#delivery-address').value.trim();
+        customerInfo.contact = el('#contact-person').value.trim();
+        customerInfo.comment = el('#order-comment').value.trim();
 
-        const grandTotal = activeOrderItems.reduce((acc, item) => acc + item.subtotal, 0);
-        
-        let orderText = `*НОВЕ ЗАМОВЛЕННЯ*\n\n` +
-                              `*Адреса:* ${customerInfo.address}\n` +
-                              `*Контакт:* ${customerInfo.contact}\n` +
-                              (customerInfo.comment ? `*Коментар:* ${customerInfo.comment}\n` : '') +
-                              `--------------------\n` +
-                              activeOrderItems.map(item => `• ${item.name} (ціна: ${item.price.toFixed(2)} грн) - ${item.quantity} ящ. (${item.total_pcs} шт.)`).join('\n') +
-                              `\n--------------------\n` +
-                              `*Всього до сплати: ${grandTotal.toFixed(2)} грн*`;
+        if (!customerInfo.address || !customerInfo.contact) {
+            return showToast('Будь ласка, заповніть адресу та контактну особу.', 'error');
+        }
+        saveStateToLocalStorage();
 
-        if (navigator.share) {
+        const orderText = buildOrderText(activeOrderItems);
+        const payload   = buildOrderPayload(activeOrderItems);
+
+        const btn = el('#share-order');
+        const btnHTML = btn.innerHTML;
+        isSending = true;
+        btn.disabled = true;
+        btn.classList.add('opacity-60', 'cursor-not-allowed');
+
+        // --- 1. Стартуємо відправку (без await!) ---
+        postOrder(payload)
+            .then(res => {
+                showToast(`Замовлення ${res.orderNo || ''} прийнято · текст скопійовано`, 'success');
+                clearOrderAfterSend();
+            })
+            .catch(err => {
+                console.error('Не вдалося надіслати замовлення:', err);
+                queuePendingOrder(payload);
+                showToast('Немає зв’язку. Замовлення збережено і надішлеться автоматично.', 'error');
+            })
+            .finally(() => {
+                isSending = false;
+                btn.disabled = false;
+                btn.classList.remove('opacity-60', 'cursor-not-allowed');
+                btn.innerHTML = btnHTML;
+            });
+
+        // --- 2. Копіюємо в буфер (синхронно, поки жест ще "живий") ---
+        copyToClipboard(orderText, true);
+
+        // --- 3. Відкриваємо "Поділитися" ---
+        if (canUseNativeShare(orderText)) {
             try {
-                await navigator.share({
-                    title: 'Замовлення Food Line Production',
-                    text: orderText,
-                });
+                await navigator.share({ title: 'Замовлення Food Line Production', text: orderText });
             } catch (error) {
-                console.error('Sharing failed, falling back to clipboard:', error);
-                copyToClipboard(orderText);
+                // AbortError = користувач закрив вікно. Це не помилка: замовлення вже пішло.
+                if (error && error.name !== 'AbortError') {
+                    console.error('Web Share не спрацював, показуємо запасне вікно:', error);
+                    openShareFallback(orderText);
+                }
             }
         } else {
-            copyToClipboard(orderText);
+            openShareFallback(orderText);
         }
     }
-    
-    function copyToClipboard(text) {
-        const textArea = document.createElement('textarea');
-        textArea.value = text;
-        textArea.style.position = 'fixed'; 
-        textArea.style.opacity = '0';
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        try {
-            document.execCommand('copy');
-            showToast('Текст замовлення скопійовано!', 'success');
-        } catch (err) {
-            showToast('Не вдалося скопіювати текст.', 'error');
+
+    /**
+     * Chrome і Edge на десктопі МАЮТЬ navigator.share, але системне вікно там
+     * регулярно падає з "Не удалось показать все способы, которыми можно поделиться".
+     * Тому нативний share вмикаємо лише на сенсорних пристроях, а на десктопі
+     * показуємо власне вікно з готовими посиланнями.
+     */
+    function canUseNativeShare(text) {
+        if (!navigator.share) return false;
+
+        const isTouch    = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+        const isMobileUA = /Android|iPhone|iPad|iPod|Mobile|Silk/i.test(navigator.userAgent);
+        if (!isTouch && !isMobileUA) return false;
+
+        if (navigator.canShare) {
+            try { return navigator.canShare({ text: text }); } catch (e) { return false; }
         }
-        document.body.removeChild(textArea);
+        return true;
+    }
+
+    function openShareFallback(text) {
+        const enc = encodeURIComponent(text);
+        el('#share-fallback-text').value = text;
+        el('#share-telegram').href = 'https://t.me/share/url?url=' + encodeURIComponent(location.href) + '&text=' + enc;
+        el('#share-viber').href    = 'viber://forward?text=' + enc;
+        el('#share-email').href    = 'mailto:?subject=' + encodeURIComponent('Замовлення Food Line Production') + '&body=' + enc;
+        el('#share-fallback').classList.remove('hidden');
+    }
+
+    function closeShareFallback() {
+        el('#share-fallback').classList.add('hidden');
+    }
+
+    function copyToClipboard(text, silent) {
+        let ok = false;
+        // execCommand синхронний — не "з'їдає" жест користувача перед navigator.share()
+        try {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            ok = document.execCommand('copy');
+            document.body.removeChild(textArea);
+        } catch (err) {
+            ok = false;
+        }
+        // запасний варіант для браузерів, де execCommand вимкнено
+        if (!ok && navigator.clipboard) {
+            navigator.clipboard.writeText(text)
+                .then(() => { ok = true; })
+                .catch(e => console.error('Буфер обміну недоступний:', e));
+        }
+        if (!silent) {
+            showToast(ok ? 'Текст замовлення скопійовано!' : 'Не вдалося скопіювати текст.',
+                      ok ? 'success' : 'error');
+        }
     }
 
     function filterProducts() {
@@ -491,7 +689,16 @@
             el(`#${id}`).addEventListener('input', handleCustomerInfoChange);
         });
         
-        el('#share-order').addEventListener('click', shareOrder);
+        el('#share-order').addEventListener('click', submitOrder);
+
+        el('#share-fallback-close').addEventListener('click', closeShareFallback);
+        el('#share-fallback').addEventListener('click', (e) => {
+            if (e.target === el('#share-fallback')) closeShareFallback();
+        });
+        el('#share-copy-again').addEventListener('click', () => {
+            copyToClipboard(el('#share-fallback-text').value, false);
+        });
+
         el('#reset-order').addEventListener('click', resetOrder);
 
         el('#search-input').addEventListener('input', filterProducts);
@@ -561,6 +768,9 @@
             
             updateStatus('Відображення товарів...');
             renderProducts();
+
+            // тихо дошлемо все, що не пішло минулого разу
+            flushPendingOrders();
 
         } catch (error) {
             console.error("CRITICAL ERROR during app initialization:", error);
